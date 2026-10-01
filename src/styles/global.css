@@ -1,0 +1,100 @@
+/*
+ * The few global rules StyleX can't express: the document ground and resets.
+ * Body colors mirror the canvas tokens so the page never shows the host's
+ * background, in every theme state claude.ai can set.
+ */
+:root {
+  color-scheme: light;
+  --wf-ground: #eceef2;
+  --wf-ink: #14161b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --wf-ground: #0f1013;
+    --wf-ink: #eceef3;
+  }
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --wf-ground: #0f1013;
+  --wf-ink: #eceef3;
+}
+:root[data-wf-theme='light'] {
+  color-scheme: light;
+  --wf-ground: #eceef2;
+  --wf-ink: #14161b;
+}
+:root[data-wf-theme='dark'] {
+  color-scheme: dark;
+  --wf-ground: #0f1013;
+  --wf-ink: #eceef3;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: var(--wf-ground);
+  color: var(--wf-ink);
+  font-family: 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+/* Resets sit in a low layer so StyleX rules (in later layers) always win. */
+@layer reset {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  p {
+    margin: 0;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  img {
+    max-width: 100%;
+  }
+  [hidden] {
+    display: none !important;
+  }
+  ::selection {
+    background: rgba(46, 91, 255, 0.22);
+  }
+}
+/* Theme switch: the new theme is revealed by a clip-path animation from the toggle. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
