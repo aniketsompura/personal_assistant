@@ -4,7 +4,7 @@ import { useMemo, type ReactNode } from 'react';
 import { useStore } from '../data/store';
 import { useRouter } from '../app/router';
 import { useDialogs } from '../app/dialogs';
-import { addDays, formatLongDate, greeting, toISODate } from '../lib/dates';
+import { addDays, formatLongDate, greeting, localDay, timeAgo, toISODate, todayISO } from '../lib/dates';
 import {
   PACE_LABEL,
   activeProjects,
@@ -26,6 +26,8 @@ import { ProgressBar } from '../components/Progress';
 import { Timeline, UpdateComposer } from '../components/Updates';
 import { Button, Dot, Swatch } from '../components/ui';
 import { Icon } from '../components/Icon';
+import { Markdown } from '../components/Markdown';
+import { SOURCE_META } from '../connectors/registry';
 
 const s = stylex.create({
   page: { display: 'flex', flexDirection: 'column', gap: space.xxl },
@@ -86,6 +88,19 @@ const s = stylex.create({
   tagLate: { color: color.redline, backgroundColor: color.redlineSoft },
   tagSoon: { color: color.warn, backgroundColor: color.warnSoft },
   tagQuiet: { color: color.inkMuted, backgroundColor: color.sunken },
+  okIcon: {
+    display: 'grid',
+    placeItems: 'center',
+    width: 26,
+    height: 26,
+    flexShrink: 0,
+    borderRadius: radius.sm,
+    backgroundColor: color.accentSoft,
+    color: color.accent,
+  },
+  okText: { display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, paddingBlock: 4 },
+  okSub: { fontSize: text.small, color: color.inkFaint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  okButton: { marginTop: space.md },
   allClear: { display: 'flex', alignItems: 'center', gap: space.sm, color: color.good, fontSize: text.ui, fontWeight: 550 },
   pulse: { display: 'flex', flexDirection: 'column', gap: space.lg },
   pulseRow: {
@@ -267,6 +282,15 @@ export function TodayView() {
   const recent = useMemo(() => sortUpdates(Object.values(data.updates)).slice(0, 6), [data.updates]);
   const name = data.settings.ownerName.trim();
   const isNew = goals.length === 0 || Object.keys(data.projects).length === 0 || Object.keys(data.updates).length === 0;
+  const pending = useMemo(
+    () =>
+      Object.values(data.inbox)
+        .filter((p) => p.status === 'pending')
+        .sort((a, b) => (a.risk === 'high' ? 0 : 1) - (b.risk === 'high' ? 0 : 1) || b.createdAt.localeCompare(a.createdAt)),
+    [data.inbox],
+  );
+  // Only today's brief: yesterday's would be stale advice.
+  const brief = data.brief && localDay(data.brief.generatedAt) === todayISO() ? data.brief : null;
 
   return (
     <div {...stylex.props(s.page)}>
@@ -277,6 +301,12 @@ export function TodayView() {
       />
 
       {isNew && <Onboarding />}
+
+      {brief && (
+        <Frame tag="Morning brief · from your agent" tagMeta={timeAgo(brief.generatedAt)}>
+          <Markdown source={brief.body} />
+        </Frame>
+      )}
 
       <Frame tag={`Cycle · ${data.settings.cycleLabel}`} tagMeta={`${cycle.pct}% of the year gone`} padding="md">
         <CycleRuler data={data} onOpen={(p) => navigate({ name: 'project', id: p.id })} />
@@ -299,6 +329,33 @@ export function TodayView() {
         </div>
 
         <div {...stylex.props(s.col)}>
+          {pending.length > 0 && (
+            <Frame tag="Needs your OK" tagMeta={`${pending.length} from your tools`}>
+              <m.div variants={listVariants} initial="hidden" animate="show" {...stylex.props(s.attention)}>
+                {pending.slice(0, 4).map((p) => {
+                  const project = p.projectId ? data.projects[p.projectId] : null;
+                  return (
+                    <m.button key={p.id} variants={itemVariants} type="button" onClick={() => navigate({ name: 'inbox' })} {...stylex.props(s.attnRow)}>
+                      <span {...stylex.props(s.okIcon)}>
+                        <Icon name={SOURCE_META[p.source.kind].icon} size={14} />
+                      </span>
+                      <span {...stylex.props(s.okText)}>
+                        <span {...stylex.props(s.attnTitle)}>{p.title}</span>
+                        <span {...stylex.props(s.okSub)}>
+                          {p.actions.some((a) => a.type === 'send_report') ? 'Ready to send on Teams' : project ? project.title : 'Needs a project'}
+                        </span>
+                      </span>
+                      {p.risk === 'high' && <span {...stylex.props(s.attnTag, s.tagLate)}>Urgent</span>}
+                    </m.button>
+                  );
+                })}
+              </m.div>
+              <Button size="sm" variant="primary" icon="inbox" onClick={() => navigate({ name: 'inbox' })} xstyle={s.okButton}>
+                Review {pending.length > 1 ? `all ${pending.length}` : ''} in Inbox
+              </Button>
+            </Frame>
+          )}
+
           <Frame tag="Needs attention" tagMeta={attention.length ? `${attention.length}` : undefined}>
             {attention.length ? (
               <m.div variants={listVariants} initial="hidden" animate="show" {...stylex.props(s.attention)}>

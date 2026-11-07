@@ -1,20 +1,36 @@
 import {
+  CONNECTOR_MODES,
   DEFAULT_SETTINGS,
   GOAL_COLORS,
   LINK_KINDS,
+  MANUAL_SOURCE,
   PRIORITIES,
   PROJECT_STATUSES,
+  PROPOSAL_RISKS,
+  PROPOSAL_STATUSES,
   REQUIREMENT_LEVELS,
+  SOURCE_KINDS,
   UPDATE_KINDS,
+  type Brief,
   type CollectionMap,
   type CollectionName,
+  type ConnectorMode,
+  type ConnectorState,
   type Goal,
   type Measure,
   type Note,
   type Project,
+  type ProjectAnchors,
   type ProjectLink,
+  type Proposal,
+  type ProposedAction,
+  type Report,
+  type ReportSettings,
+  DEFAULT_REPORT_SETTINGS,
+  REPORT_STATUSES,
   type Requirement,
   type Settings,
+  type SourceRef,
   type Update,
 } from './types';
 import { isValidISODate, localDay, nowISO, todayISO } from '../lib/dates';
@@ -142,6 +158,30 @@ export function normalizeProject(id: string, v: unknown): Project {
     createdAt,
     updatedAt,
     lastActivityAt: time(r.lastActivityAt, updatedAt),
+    anchors: normalizeAnchors(r.anchors),
+  };
+}
+
+export function normalizeAnchors(v: unknown): ProjectAnchors {
+  const r = obj(v);
+  const uniq = (list: string[]) => [...new Set(list)];
+  return {
+    repos: uniq(strList(r.repos)),
+    jiraKeys: uniq(strList(r.jiraKeys).map((k) => k.toUpperCase())),
+    keywords: uniq(strList(r.keywords)),
+    channels: uniq(strList(r.channels)),
+  };
+}
+
+export function normalizeSource(v: unknown): SourceRef {
+  if (!v || typeof v !== 'object') return { ...MANUAL_SOURCE };
+  const r = obj(v);
+  const url = str(r.url).trim();
+  return {
+    kind: oneOf(SOURCE_KINDS, r.kind, 'agent'),
+    ref: str(r.ref).trim() || null,
+    url: /^https?:\/\//i.test(url) ? url : null,
+    label: str(r.label).trim().slice(0, 80) || null,
   };
 }
 
@@ -162,6 +202,8 @@ export function normalizeUpdate(id: string, v: unknown): Update {
     statusFrom: statusOrNull(r.statusFrom),
     statusTo: statusOrNull(r.statusTo),
     auto: bool(r.auto),
+    source: normalizeSource(r.source),
+    proposalId: str(r.proposalId) || null,
     createdAt,
     updatedAt: time(r.updatedAt, createdAt),
   };
@@ -192,7 +234,157 @@ export function normalizeSettings(v: unknown): Settings {
     cycleStart: isValidISODate(r.cycleStart) ? r.cycleStart : DEFAULT_SETTINGS.cycleStart,
     cycleEnd: isValidISODate(r.cycleEnd) ? r.cycleEnd : DEFAULT_SETTINGS.cycleEnd,
     staleAfterDays: Math.max(1, Math.round(num(r.staleAfterDays, DEFAULT_SETTINGS.staleAfterDays))),
+    report: normalizeReportSettings(r.report),
   };
+}
+
+export function normalizeReportSettings(v: unknown): ReportSettings {
+  const r = obj(v);
+  const d = DEFAULT_REPORT_SETTINGS;
+  const time = str(r.time);
+  return {
+    enabled: bool(r.enabled, d.enabled),
+    weekday: Math.min(6, Math.max(0, Math.round(num(r.weekday, d.weekday)))),
+    time: /^([01]\d|2[0-3]):[0-5]\d$/.test(time) ? time : d.time,
+    recipientName: str(r.recipientName).trim(),
+    recipientEmail: str(r.recipientEmail).trim(),
+    delivery: r.delivery === 'auto' ? 'auto' : 'review',
+  };
+}
+
+export function normalizeReport(id: string, v: unknown): Report {
+  const r = obj(v);
+  const now = nowISO();
+  const createdAt = time(r.createdAt, now);
+  const periodEnd = isValidISODate(r.periodEnd) ? r.periodEnd : localDay(createdAt);
+  const sentVia = r.sentVia === 'teams-workflow' || r.sentVia === 'manual' ? r.sentVia : null;
+  return {
+    id,
+    periodStart: isValidISODate(r.periodStart) ? r.periodStart : periodEnd,
+    periodEnd,
+    title: str(r.title).trim() || 'Weekly report',
+    body: str(r.body),
+    recipientName: str(r.recipientName).trim(),
+    recipientEmail: str(r.recipientEmail).trim(),
+    status: oneOf(REPORT_STATUSES, r.status, 'draft'),
+    sentAt: typeof r.sentAt === 'string' && !Number.isNaN(Date.parse(r.sentAt)) ? r.sentAt : null,
+    sentVia,
+    note: str(r.note).slice(0, 400),
+    createdAt,
+    updatedAt: time(r.updatedAt, createdAt),
+  };
+}
+
+function normalizeAction(v: unknown): ProposedAction | null {
+  const r = obj(v);
+  switch (r.type) {
+    case 'log_update': {
+      const text = str(r.text).trim();
+      if (!text) return null;
+      return {
+        type: 'log_update',
+        date: isValidISODate(r.date) ? r.date : todayISO(),
+        text,
+        kind: oneOf(UPDATE_KINDS, r.kind, 'progress'),
+        progressTo: r.progressTo === null || r.progressTo === undefined ? null : pct(r.progressTo),
+        statusTo: typeof r.statusTo === 'string' ? oneOf(PROJECT_STATUSES, r.statusTo, 'design') : null,
+      };
+    }
+    case 'add_link': {
+      const url = str(r.url).trim();
+      if (!/^https?:\/\//i.test(url)) return null;
+      return { type: 'add_link', url, label: str(r.label).trim() || url, kind: oneOf(LINK_KINDS, r.kind, guessLinkKind(url)) };
+    }
+    case 'add_requirement': {
+      const text = str(r.text).trim();
+      return text ? { type: 'add_requirement', text, level: oneOf(REQUIREMENT_LEVELS, r.level, 'should') } : null;
+    }
+    case 'complete_requirement': {
+      const requirementId = str(r.requirementId);
+      return requirementId ? { type: 'complete_requirement', requirementId, text: str(r.text) } : null;
+    }
+    case 'create_project': {
+      const title = str(r.title).trim();
+      if (!title) return null;
+      return {
+        type: 'create_project',
+        title,
+        summary: str(r.summary),
+        goalIds: strList(r.goalIds),
+        status: oneOf(PROJECT_STATUSES, r.status, 'discovery'),
+        dueDate: dateOrNull(r.dueDate),
+      };
+    }
+    case 'add_anchor': {
+      // Exact match: these keys are camelCase, and oneOf() lowercases its input.
+      const fields = ['repos', 'jiraKeys', 'keywords', 'channels'] as const;
+      const field = fields.find((f) => f === r.field) ?? 'keywords';
+      const value = str(r.value).trim();
+      return value ? { type: 'add_anchor', field, value } : null;
+    }
+    case 'add_note': {
+      const body = str(r.body).trim();
+      return body ? { type: 'add_note', title: str(r.title).trim(), body } : null;
+    }
+    case 'send_report': {
+      const reportId = str(r.reportId);
+      return reportId ? { type: 'send_report', reportId } : null;
+    }
+    default:
+      return null;
+  }
+}
+
+export function normalizeProposal(id: string, v: unknown): Proposal {
+  const r = obj(v);
+  const now = nowISO();
+  const createdAt = time(r.createdAt, now);
+  const src = obj(r.source);
+  const applied = obj(r.applied);
+  return {
+    id,
+    source: { ...normalizeSource(r.source), occurredAt: time(src.occurredAt, createdAt) },
+    title: str(r.title).trim() || 'Something to log',
+    summary: str(r.summary).trim(),
+    why: str(r.why).trim(),
+    projectId: str(r.projectId) || null,
+    confidence: Math.max(0, Math.min(1, num(r.confidence, 0.5))),
+    actions: arr(r.actions)
+      .map(normalizeAction)
+      .filter((a): a is ProposedAction => a !== null),
+    risk: oneOf(PROPOSAL_RISKS, r.risk, 'medium'),
+    status: oneOf(PROPOSAL_STATUSES, r.status, 'pending'),
+    decidedAt: typeof r.decidedAt === 'string' ? time(r.decidedAt, now) : null,
+    applied: {
+      updateIds: strList(applied.updateIds),
+      noteIds: strList(applied.noteIds),
+      linkUrls: strList(applied.linkUrls),
+      projectId: str(applied.projectId) || null,
+    },
+    createdAt,
+    updatedAt: time(r.updatedAt, createdAt),
+  };
+}
+
+export function normalizeConnector(id: string, v: unknown, defaultMode: ConnectorMode = 'off'): ConnectorState {
+  const r = obj(v);
+  return {
+    id,
+    mode: oneOf(CONNECTOR_MODES, r.mode, defaultMode),
+    lastRunAt: typeof r.lastRunAt === 'string' && !Number.isNaN(Date.parse(r.lastRunAt)) ? r.lastRunAt : null,
+    lastStatus: r.lastStatus === 'ok' || r.lastStatus === 'error' ? r.lastStatus : 'never',
+    lastMessage: str(r.lastMessage).slice(0, 400),
+    cursor: str(r.cursor) || null,
+    ignore: strList(r.ignore),
+    updatedAt: time(r.updatedAt, nowISO()),
+  };
+}
+
+export function normalizeBrief(v: unknown): Brief | null {
+  const r = obj(v);
+  const body = str(r.body).trim();
+  if (!body || typeof r.generatedAt !== 'string' || Number.isNaN(Date.parse(r.generatedAt))) return null;
+  return { generatedAt: r.generatedAt, body };
 }
 
 export const normalizers: { [K in CollectionName]: (id: string, v: unknown) => CollectionMap[K] } = {
@@ -200,6 +392,9 @@ export const normalizers: { [K in CollectionName]: (id: string, v: unknown) => C
   projects: normalizeProject,
   updates: normalizeUpdate,
   notes: normalizeNote,
+  inbox: normalizeProposal,
+  connectors: (id, v) => normalizeConnector(id, v),
+  reports: normalizeReport,
 };
 
 function hash(s: string) {

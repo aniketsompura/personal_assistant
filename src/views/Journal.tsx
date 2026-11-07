@@ -15,8 +15,9 @@ import { Timeline, UpdateComposer } from '../components/Updates';
 import { AssistPanel } from '../components/AssistPanel';
 import { Select } from '../components/ui';
 import { NotesPane } from './project/Notes';
+import { ReportsPane } from './Reports';
 
-type JournalTab = 'log' | 'notes' | 'recap';
+type JournalTab = 'log' | 'notes' | 'reports' | 'recap';
 type Range = 'week' | '2weeks' | 'month' | 'cycle';
 
 const s = stylex.create({
@@ -110,6 +111,7 @@ export function JournalView() {
         items={[
           { value: 'log', label: 'Log', count: filtered.length },
           { value: 'notes', label: 'General notes', count: generalNotes },
+          { value: 'reports', label: 'Weekly reports', count: Object.values(data.reports).filter((r) => r.status === 'draft').length },
           ...(sample ? [{ value: 'recap' as const, label: 'Recap' }] : []),
         ]}
       />
@@ -174,6 +176,8 @@ export function JournalView() {
           )}
 
           {tab === 'notes' && <NotesPane projectId={null} />}
+
+          {tab === 'reports' && <ReportsPane />}
 
           {tab === 'recap' && (
             <Frame tag="Recap" tagMeta="Drafted by Claude from your log">

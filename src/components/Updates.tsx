@@ -14,6 +14,7 @@ import { ProgressSlider } from './Progress';
 import { Button, Dot, IconButton, Select, TextArea, TextInput } from './ui';
 import { useToast } from './Toast';
 import { useRouter } from '../app/router';
+import { SOURCE_META } from '../connectors/registry';
 
 const UPDATE_PLACEHOLDER: Record<UpdateKind, string> = {
   progress: 'What moved? e.g. Finished the empty-state explorations; reviewing with PM tomorrow.',
@@ -516,6 +517,24 @@ const tl = stylex.create({
     whiteSpace: 'nowrap',
   },
   auto: { fontSize: text.small, color: color.inkFaint, fontStyle: 'italic' },
+  source: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 4,
+    height: 20,
+    maxWidth: 260,
+    paddingInline: 7,
+    borderRadius: radius.pill,
+    backgroundColor: color.accentSoft,
+    color: color.accent,
+    fontFamily: font.mono,
+    fontSize: 10.5,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    textDecoration: 'none',
+  },
+  sourceLink: { textDecoration: { default: 'none', ':hover': 'underline' } },
   text: { fontSize: text.body, lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: color.ink },
   changes: { display: 'flex', flexWrap: 'wrap', gap: 6 },
   change: {
@@ -549,6 +568,26 @@ const tl = stylex.create({
   },
   editRow: { display: 'flex', gap: space.sm, justifyContent: 'flex-end' },
 });
+
+/** "via Claude Code · enrollment-proto", linked to the source when there is one. */
+function SourceChip({ update: u }: { update: Update }) {
+  const meta = SOURCE_META[u.source.kind];
+  const label = (
+    <>
+      <Icon name={meta.icon} size={11} />
+      via {meta.label}
+      {u.source.label ? ` · ${u.source.label}` : ''}
+      {u.auto ? ' · auto' : ''}
+    </>
+  );
+  return u.source.url ? (
+    <a href={u.source.url} target="_blank" rel="noopener noreferrer" title={`Open in ${meta.label}`} {...stylex.props(tl.source, tl.sourceLink)}>
+      {label}
+    </a>
+  ) : (
+    <span {...stylex.props(tl.source)}>{label}</span>
+  );
+}
 
 export function Timeline({
   updates,
@@ -631,7 +670,8 @@ export function Timeline({
                             <span {...stylex.props(tl.auto)}>General</span>
                           )
                         )}
-                        {u.auto && <span {...stylex.props(tl.auto)}>logged automatically</span>}
+                        {u.source.kind !== 'manual' && <SourceChip update={u} />}
+                        {u.auto && u.source.kind === 'manual' && <span {...stylex.props(tl.auto)}>logged automatically</span>}
                       </div>
 
                       {isEditing ? (
@@ -695,7 +735,7 @@ export function Timeline({
                     </div>
                     {!isEditing && !meta.readOnly && (
                       <div {...stylex.props(tl.actions)}>
-                        {!u.auto && (
+                        {(!u.auto || !!u.text) && (
                           <IconButton icon="edit" label="Edit update" size="sm" onClick={() => setEditing({ id: u.id, text: u.text })} />
                         )}
                         <IconButton icon="trash" label="Delete update" size="sm" onClick={() => actions.deleteUpdate(u.id)} />

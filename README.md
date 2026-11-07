@@ -16,7 +16,11 @@ Built with **React 19**, **StyleX** and **Motion**, bundled by **Vite** into a s
 | **Projects** | Board by stage (Idea → Discovery → Design → Review → Handoff → Shipped, plus On hold) with drag and drop, or a sortable list. |
 | **Project page** | Overview, dated **updates** (a version history), **requirements** (MoSCoW), **notes** (Markdown with templates), **links** (prototypes, Figma, docs, tickets), and a design-tool-style **properties** panel. |
 | **Journal** | Everything logged, grouped by ISO week; general entries and notes; Claude-drafted recaps for your 1:1. |
+| **Inbox** | What the agent noticed in your tools: approve, edit, re-assign or dismiss; undo anything it logged on its own. |
+| **Connections** | Switch each source on, choose "Ask me first" or "Log automatically", see when it last ran; set up the weekly report. |
 | **Settings & data** | Profile, review cycle dates, theme, export / import, erase. |
+
+**Autopilot.** The Workfile Agent (a Claude Code plugin in [`agent/`](agent/)) keeps Workfile current from your tools: Claude Code sessions today, then Figma, Jira, Teams and Outlook on the work Mac. Small things log themselves with their source and an Undo; anything that changes a project waits in the **Inbox** for your OK. It also writes a morning brief and a **weekly report** for one person on Teams, on the day you pick. Set it up on the **Connections** page; the full plan is in [`docs/automation-plan.md`](docs/automation-plan.md).
 
 Updates drive the project. Logging an update can move progress and stage, and changes made in the properties panel are recorded on the timeline automatically. When Workfile runs inside Claude, **Suggest changes** reads a free-text update and proposes the progress, stage and requirement changes it implies.
 
@@ -76,7 +80,13 @@ Every record is a plain JSON document. In the Artifact database they live at the
 | `projects/{id}` | `{ title, summary, status, priority, progress, goalIds[], startDate, dueDate, team, tags[], requirements: [{id, text, done, level, createdAt}], links: [{id, label, url, kind, createdAt}], pinned, archived, createdAt, updatedAt, lastActivityAt }` |
 | `updates/{id}` | `{ projectId \| null, date, text, kind, progressFrom, progressTo, statusFrom, statusTo, auto, createdAt, updatedAt }` |
 | `notes/{id}` | `{ projectId \| null, title, body (Markdown), pinned, createdAt, updatedAt }` |
-| `meta/settings` | `{ ownerName, role, company, cycleLabel, cycleStart, cycleEnd, staleAfterDays }` |
+| `meta/settings` | `{ ownerName, role, company, cycleLabel, cycleStart, cycleEnd, staleAfterDays, report: { enabled, weekday, time, recipientName, recipientEmail, delivery } }` |
+| `inbox/{id}` | A proposal from the agent: `{ source, title, summary, why, projectId, confidence, actions[], risk, status, applied }` |
+| `connectors/{id}` | `{ mode: off\|ask\|auto, lastRunAt, lastStatus, lastMessage, cursor, ignore[] }` |
+| `reports/{id}` | `{ periodStart, periodEnd, title, body, recipientName, recipientEmail, status, sentAt, sentVia, note }` |
+| `meta/brief` | `{ generatedAt, body }`: the agent's morning brief |
+
+Updates also carry `source: { kind, ref, url, label }` and `proposalId`; projects carry `anchors: { repos[], jiraKeys[], keywords[], channels[] }`. The agent's full contract is [`agent/reference/records.md`](agent/reference/records.md).
 
 Enumerations live in [`src/data/types.ts`](src/data/types.ts):
 

@@ -1,0 +1,11 @@
+{
+  "description": "Notes which Claude Code sessions had activity, for the Workfile Agent's scheduled sync. Local only; no network.",
+  "hooks": {
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/capture-session.mjs\"", "timeout": 10 }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/capture-session.mjs\"", "timeout": 10 }] }
+    ]
+  }
+}

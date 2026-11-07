@@ -115,6 +115,10 @@ const s = stylex.create({
   factVal: { fontFamily: font.mono, fontSize: text.label, color: color.ink },
   actions: { display: 'flex', flexWrap: 'wrap', gap: 6 },
   muted: { fontSize: text.small, color: color.inkFaint },
+  hint: { fontSize: text.small, color: color.inkFaint },
+  anchor: { display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 },
+  tagMono: { fontFamily: font.mono, fontSize: 10.5 },
+  tagText: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 },
   summary: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -151,6 +155,70 @@ function SpecLine({ start, due }: { start: string | null; due: string | null }) 
   );
 }
 
+/** A row of removable chips with an input to add more. */
+function AnchorField({
+  label,
+  placeholder,
+  values,
+  onChange,
+  readOnly,
+  mono,
+}: {
+  label: string;
+  placeholder: string;
+  values: string[];
+  onChange: (next: string[]) => void;
+  readOnly: boolean;
+  mono?: boolean;
+}) {
+  const [draft, setDraft] = useState('');
+  const add = () => {
+    const parts = draft
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .filter((x) => !values.includes(x));
+    if (parts.length) onChange([...values, ...parts]);
+    setDraft('');
+  };
+  return (
+    <div {...stylex.props(s.anchor)}>
+      <span {...stylex.props(s.dateLabel)}>{label}</span>
+      {values.length > 0 && (
+        <div {...stylex.props(s.tags)}>
+          {values.map((v) => (
+            <span key={v} title={v} {...stylex.props(s.tag, mono && s.tagMono)}>
+              <span {...stylex.props(s.tagText)}>{v}</span>
+              {!readOnly && (
+                <button type="button" aria-label={`Remove ${v}`} onClick={() => onChange(values.filter((x) => x !== v))} {...stylex.props(s.tagX)}>
+                  <Icon name="x" size={10} />
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+      {!readOnly && (
+        <TextInput
+          compact
+          bare
+          value={draft}
+          placeholder={values.length ? 'Add another' : placeholder}
+          aria-label={`Add ${label.toLowerCase()}`}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => draft.trim() && add()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              add();
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 export function Inspector({ project: p }: { project: Project }) {
   const { data, actions, meta } = useStore();
   const { navigate } = useRouter();
@@ -166,6 +234,7 @@ export function Inspector({ project: p }: { project: Project }) {
     .sort((a, b) => a.order - b.order);
   const last = lastUpdateFor(p.id, data.updates);
   const shown = progress ?? p.progress;
+  const figmaFiles = p.links.filter((l) => /figma\.com\/(design|file|proto|board)\//i.test(l.url));
   const compact = useMediaQuery('(max-width: 1080px)');
   const [open, setOpen] = useState(false);
   const due = dueLabel(p);
@@ -376,6 +445,28 @@ export function Inspector({ project: p }: { project: Project }) {
               }
             }}
           />
+        )}
+      </div>
+
+      <div {...stylex.props(s.section)}>
+        <div {...stylex.props(s.row)}>
+          <PanelLabel>Tracking</PanelLabel>
+          <span {...stylex.props(s.hint)} title="The Workfile Agent uses these to match work in your tools to this project.">
+            for the agent
+          </span>
+        </div>
+        <AnchorField label="Folders & repos" placeholder="~/code/enrollment-proto" values={p.anchors.repos} readOnly={ro}
+          onChange={(repos) => actions.setAnchors(p.id, { ...p.anchors, repos })} mono />
+        <AnchorField label="Jira keys" placeholder="DES-142" values={p.anchors.jiraKeys} readOnly={ro}
+          onChange={(jiraKeys) => actions.setAnchors(p.id, { ...p.anchors, jiraKeys: jiraKeys.map((k) => k.toUpperCase()) })} mono />
+        <AnchorField label="Keywords" placeholder="enrollment, DEP" values={p.anchors.keywords} readOnly={ro}
+          onChange={(keywords) => actions.setAnchors(p.id, { ...p.anchors, keywords })} />
+        <AnchorField label="Teams chats & channels" placeholder="Enrollment squad" values={p.anchors.channels} readOnly={ro}
+          onChange={(channels) => actions.setAnchors(p.id, { ...p.anchors, channels })} />
+        {figmaFiles.length > 0 && (
+          <span {...stylex.props(s.hint)}>
+            Also watching {figmaFiles.length} Figma file{figmaFiles.length === 1 ? '' : 's'} from this project’s links.
+          </span>
         )}
       </div>
 
