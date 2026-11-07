@@ -1,0 +1,8 @@
+{
+  "name": "workfile-agent",
+  "version": "0.1.0",
+  "description": "Keeps your Workfile up to date from Claude Code, Figma, Jira, Teams and Outlook. Logs small things itself and asks before anything that changes a project.",
+  "author": { "name": "Aniket Sompura" },
+  "repository": "https://github.com/aniketsompura/personal_assistant",
+  "keywords": ["workfile", "productivity", "design", "logging"]
+}

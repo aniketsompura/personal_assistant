@@ -126,6 +126,7 @@ const s = stylex.create({
     fontSize: 10,
     fontWeight: 600,
   },
+  navBadgeAccent: { backgroundColor: color.accent, color: color.accentInk },
   layer: {
     display: 'flex',
     alignItems: 'center',
@@ -249,6 +250,7 @@ export function Sidebar({ onNavigate, onOpenPalette }: { onNavigate?: () => void
     [data.projects, data.goals],
   );
   const activeCount = Object.values(data.projects).filter((p) => !p.archived && p.status !== 'shipped').length;
+  const pendingCount = Object.values(data.inbox).filter((x) => x.status === 'pending').length;
 
   const projectRow = (p: Project, key: string) => {
     const selected = route.name === 'project' && route.id === p.id;
@@ -308,6 +310,26 @@ export function Sidebar({ onNavigate, onOpenPalette }: { onNavigate?: () => void
             trailing={<span {...stylex.props(s.navCount)}>{activeCount || ''}</span>}
           />
           <NavItem icon="journal" label="Journal" route={{ name: 'journal' }} active={route.name === 'journal'} onNavigate={go} />
+          <NavItem
+            icon="inbox"
+            label="Inbox"
+            route={{ name: 'inbox' }}
+            active={route.name === 'inbox'}
+            onNavigate={go}
+            trailing={
+              pendingCount > 0 ? (
+                <m.span
+                  key={pendingCount}
+                  initial={{ scale: 0.6 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: 'spring', stiffness: 600, damping: 16 }}
+                  {...stylex.props(s.navBadge, s.navBadgeAccent)}
+                >
+                  {pendingCount}
+                </m.span>
+              ) : undefined
+            }
+          />
         </div>
 
         <div {...stylex.props(s.sectionHead)}>
@@ -382,6 +404,7 @@ export function Sidebar({ onNavigate, onOpenPalette }: { onNavigate?: () => void
       </div>
 
       <div {...stylex.props(s.footer)}>
+        <NavItem icon="plug" label="Connections" route={{ name: 'connections' }} active={route.name === 'connections'} onNavigate={go} />
         <NavItem icon="settings" label="Settings & data" route={{ name: 'settings' }} active={route.name === 'settings'} onNavigate={go} />
         <div
           {...stylex.props(s.storage, (meta.fallback || !meta.persistent) && s.storageWarn)}

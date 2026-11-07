@@ -20,6 +20,8 @@ import { ProjectsView } from './views/Projects';
 import { ProjectDetailView } from './views/ProjectDetail';
 import { JournalView } from './views/Journal';
 import { SettingsView } from './views/Settings';
+import { InboxView } from './views/Inbox';
+import { ConnectionsView } from './views/Connections';
 
 /* ------------------------------------------------------------------------ */
 /* Theme                                                                     */
@@ -265,6 +267,12 @@ function Breadcrumbs() {
     case 'journal':
       parts.push({ label: 'Journal' });
       break;
+    case 'inbox':
+      parts.push({ label: 'Inbox' });
+      break;
+    case 'connections':
+      parts.push({ label: 'Connections' });
+      break;
     case 'settings':
       parts.push({ label: 'Settings & data' });
       break;
@@ -305,6 +313,10 @@ function CurrentView() {
       return <ProjectDetailView id={route.id} tab={route.tab} noteId={route.noteId} />;
     case 'journal':
       return <JournalView />;
+    case 'inbox':
+      return <InboxView />;
+    case 'connections':
+      return <ConnectionsView />;
     case 'settings':
       return <SettingsView />;
   }

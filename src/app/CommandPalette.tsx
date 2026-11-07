@@ -147,6 +147,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       { id: 'g-goals', group: 'Go to', label: 'Goals', leading: ic('goals'), run: run(() => navigate({ name: 'goals' })) },
       { id: 'g-projects', group: 'Go to', label: 'Projects', leading: ic('board'), keywords: 'board list', run: run(() => navigate({ name: 'projects' })) },
       { id: 'g-journal', group: 'Go to', label: 'Journal', leading: ic('journal'), keywords: 'notes log recap', run: run(() => navigate({ name: 'journal' })) },
+      { id: 'g-inbox', group: 'Go to', label: 'Inbox', leading: ic('inbox'), keywords: 'approve proposals agent review', run: run(() => navigate({ name: 'inbox' })) },
+      { id: 'g-connections', group: 'Go to', label: 'Connections', leading: ic('plug'), keywords: 'jira teams figma outlook claude code agent sources', run: run(() => navigate({ name: 'connections' })) },
       { id: 'g-settings', group: 'Go to', label: 'Settings & data', leading: ic('settings'), keywords: 'export import backup', run: run(() => navigate({ name: 'settings' })) },
     ];
     const projects: Item[] = Object.values(data.projects)

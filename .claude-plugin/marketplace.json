@@ -1,0 +1,15 @@
+{
+  "name": "workfile",
+  "owner": { "name": "Aniket Sompura" },
+  "metadata": {
+    "description": "Workfile: a personal work assistant for a product designer's goals, projects and updates."
+  },
+  "plugins": [
+    {
+      "name": "workfile-agent",
+      "source": "./agent",
+      "description": "Keeps your Workfile up to date from Claude Code, Figma, Jira, Teams and Outlook. Logs small things itself and asks before anything that changes a project.",
+      "version": "0.1.0"
+    }
+  ]
+}

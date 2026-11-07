@@ -1,0 +1,5 @@
+{
+  "artifactUrl": "https://claude.ai/artifact/REPLACE_WITH_YOUR_WORKFILE_ID",
+  "account": "personal",
+  "ignoreFolders": ["~/.workfile"]
+}

@@ -1,5 +1,5 @@
 import { DEFAULT_SETTINGS, type CollectionMap, type CollectionName, type DataSnapshot, type Settings } from './types';
-import { normalizers, normalizeSettings } from './normalize';
+import { normalizeBrief, normalizers, normalizeSettings } from './normalize';
 import type { ClaudeDb, DbError, DocSnapshot } from '../lib/claude';
 
 /*
@@ -10,8 +10,12 @@ import type { ClaudeDb, DbError, DocSnapshot } from '../lib/claude';
  * interface; nothing else changes.
  */
 
-export const COLLECTIONS: CollectionName[] = ['goals', 'projects', 'updates', 'notes'];
+export const COLLECTIONS: CollectionName[] = ['goals', 'projects', 'updates', 'notes', 'inbox', 'connectors', 'reports'];
+/** Collections that move with an export. The inbox and connector state stay with each account. */
+export const EXPORTED_COLLECTIONS: CollectionName[] = ['goals', 'projects', 'updates', 'notes', 'reports'];
 export const SETTINGS_PATH = 'meta/settings';
+/** Written by the Workfile Agent; the app only reads it. */
+export const BRIEF_PATH = 'meta/brief';
 
 export type SnapshotPatch = Partial<DataSnapshot> & { ready?: boolean };
 
@@ -82,7 +86,7 @@ export function createArtifactAdapter(db: ClaudeDb): StorageAdapter {
     persistent: true,
 
     subscribe(listener, onError) {
-      const pending = new Set<string>([...COLLECTIONS, 'settings']);
+      const pending = new Set<string>([...COLLECTIONS, 'settings', 'brief']);
       let readySent = false;
       const markLoaded = (key: string) => {
         pending.delete(key);
@@ -131,8 +135,17 @@ export function createArtifactAdapter(db: ClaudeDb): StorageAdapter {
         unsubs.push(unsub);
       };
 
+      const watchBrief = () => {
+        const unsub = db.doc(BRIEF_PATH).onSnapshot((snap) => {
+          listener({ brief: snap.exists ? normalizeBrief(snap.data()) : null });
+          markLoaded('brief');
+        }, handleError(watchBrief));
+        unsubs.push(unsub);
+      };
+
       COLLECTIONS.forEach(watchCollection);
       watchSettings();
+      watchBrief();
 
       return () => {
         disposed = true;
@@ -167,10 +180,10 @@ export function createArtifactAdapter(db: ClaudeDb): StorageAdapter {
 
 const STORAGE_KEY = 'workfile:data:v1';
 
-type RawStore = { [K in CollectionName]: Record<string, unknown> } & { settings?: unknown };
+type RawStore = { [K in CollectionName]: Record<string, unknown> } & { settings?: unknown; brief?: unknown };
 
 function readRaw(): { raw: RawStore; ok: boolean } {
-  const empty: RawStore = { goals: {}, projects: {}, updates: {}, notes: {} };
+  const empty: RawStore = { goals: {}, projects: {}, updates: {}, notes: {}, inbox: {}, connectors: {}, reports: {} };
   try {
     const text = window.localStorage.getItem(STORAGE_KEY);
     if (!text) return { raw: empty, ok: true };
@@ -182,7 +195,10 @@ function readRaw(): { raw: RawStore; ok: boolean } {
 }
 
 function toSnapshot(raw: RawStore): DataSnapshot {
-  const out = { settings: raw.settings ? normalizeSettings(raw.settings) : { ...DEFAULT_SETTINGS } } as DataSnapshot;
+  const out = {
+    settings: raw.settings ? normalizeSettings(raw.settings) : { ...DEFAULT_SETTINGS },
+    brief: normalizeBrief(raw.brief),
+  } as DataSnapshot;
   for (const col of COLLECTIONS) {
     const normalize = normalizers[col];
     const map: Record<string, unknown> = {};

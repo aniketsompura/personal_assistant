@@ -16,6 +16,8 @@ export type Route =
   | { name: 'projects' }
   | { name: 'project'; id: string; tab?: ProjectTab; noteId?: string }
   | { name: 'journal' }
+  | { name: 'inbox' }
+  | { name: 'connections' }
   | { name: 'settings' };
 
 export const routeKey = (r: Route) => ('id' in r ? `${r.name}:${r.id}` : r.name);
@@ -31,7 +33,7 @@ const RouterContext = createContext<RouterValue | null>(null);
 
 function initialRoute(): Route {
   const hash = typeof location !== 'undefined' ? location.hash.replace('#', '') : '';
-  if (['today', 'goals', 'projects', 'journal', 'settings'].includes(hash)) return { name: hash } as Route;
+  if (['today', 'goals', 'projects', 'journal', 'inbox', 'connections', 'settings'].includes(hash)) return { name: hash } as Route;
   const saved = prefs.get<Route | null>('route', null);
   return saved && typeof saved === 'object' && 'name' in saved ? saved : { name: 'today' };
 }

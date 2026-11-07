@@ -116,3 +116,19 @@ export function greeting(d = new Date()): string {
   if (h < 17) return 'Good afternoon';
   return 'Good evening';
 }
+
+/** "just now", "12 min ago", "3 h ago", "yesterday", "3 Oct" for timestamps. */
+export function timeAgo(isoDateTime: string | null | undefined): string {
+  if (!isoDateTime) return 'never';
+  const t = Date.parse(isoDateTime);
+  if (Number.isNaN(t)) return '—';
+  const mins = Math.round((Date.now() - t) / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24 && localDay(isoDateTime) === todayISO()) return `${hours} h ago`;
+  const days = daysBetween(new Date(t), new Date());
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  return formatDate(localDay(isoDateTime));
+}

@@ -1,20 +1,40 @@
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 import {
   DEFAULT_SETTINGS,
+  MANUAL_SOURCE,
   type CollectionName,
+  type ConnectorMode,
   type DataSnapshot,
   type ExportFile,
   type Goal,
   type ID,
   type Note,
   type Project,
+  type ProjectAnchors,
   type ProjectStatus,
+  type ProposedAction,
+  type Report,
   type Settings,
+  type SourceRef,
   type Update,
   type UpdateKind,
 } from './types';
-import { COLLECTIONS, createArtifactAdapter, createBrowserAdapter, type SnapshotPatch, type StorageAdapter } from './adapters';
-import { normalizeGoal, normalizeNote, normalizeProject, normalizeSettings, normalizeUpdate } from './normalize';
+import {
+  EXPORTED_COLLECTIONS,
+  createArtifactAdapter,
+  createBrowserAdapter,
+  type SnapshotPatch,
+  type StorageAdapter,
+} from './adapters';
+import {
+  normalizeConnector,
+  normalizeGoal,
+  normalizeNote,
+  normalizeProject,
+  normalizeReport,
+  normalizeSettings,
+  normalizeUpdate,
+} from './normalize';
 import { getCapability, inClaudeArtifact } from '../lib/claude';
 import { newId } from '../lib/ids';
 import { nowISO, todayISO } from '../lib/dates';
@@ -27,7 +47,17 @@ import { useToast } from '../components/Toast';
 /* State                                                                     */
 /* ------------------------------------------------------------------------ */
 
-const EMPTY: DataSnapshot = { goals: {}, projects: {}, updates: {}, notes: {}, settings: { ...DEFAULT_SETTINGS } };
+const EMPTY: DataSnapshot = {
+  goals: {},
+  projects: {},
+  updates: {},
+  notes: {},
+  inbox: {},
+  connectors: {},
+  reports: {},
+  settings: { ...DEFAULT_SETTINGS },
+  brief: null,
+};
 
 function reducer(state: { data: DataSnapshot; ready: boolean }, patch: SnapshotPatch) {
   const { ready, ...rest } = patch;
@@ -52,6 +82,9 @@ export interface NewUpdate {
   kind: UpdateKind;
   progressTo?: number | null;
   statusTo?: ProjectStatus | null;
+  /** Where it came from; manual when you type it in Workfile. */
+  source?: SourceRef;
+  proposalId?: ID | null;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -83,13 +116,14 @@ export function validateExport(v: unknown): ExportFile | null {
   if (![f.goals, f.projects, f.updates, f.notes].every((a) => a === undefined || Array.isArray(a))) return null;
   return {
     app: 'workfile',
-    schemaVersion: 1,
+    schemaVersion: f.schemaVersion === 1 ? 1 : 2,
     exportedAt: typeof f.exportedAt === 'string' ? f.exportedAt : nowISO(),
     settings: normalizeSettings(f.settings),
     goals: f.goals ?? [],
     projects: f.projects ?? [],
     updates: f.updates ?? [],
     notes: f.notes ?? [],
+    reports: Array.isArray(f.reports) ? f.reports : [],
   };
 }
 
@@ -232,7 +266,7 @@ function useStoreValue() {
       }
     };
 
-    return {
+    const api = {
       /* Goals --------------------------------------------------------------- */
       createGoal(input: Partial<Goal>): Goal {
         const now = nowISO();
@@ -332,6 +366,8 @@ function useStoreValue() {
           statusFrom: statusChanged ? p.status : null,
           statusTo: statusChanged ? input.statusTo : null,
           auto: false,
+          source: input.source ?? MANUAL_SOURCE,
+          proposalId: input.proposalId ?? null,
           createdAt: now,
           updatedAt: now,
         });
@@ -396,17 +432,230 @@ function useStoreValue() {
         return track(adapter().saveSettings(next));
       },
 
+      /* Autopilot: proposals and connectors -------------------------------- */
+
+      /**
+       * Applies the actions you kept on a proposal, to the project you chose.
+       * Project changes are gathered into one write; each update and note is its own record.
+       */
+      approveProposal(id: ID, choice: { projectId: ID | null; actions: ProposedAction[] }) {
+        const d = dataRef.current;
+        const proposal = d.inbox[id];
+        if (!proposal || proposal.status !== 'pending') return;
+        const now = nowISO();
+        const { occurredAt: _occurredAt, ...source } = proposal.source;
+        const applied = { updateIds: [] as ID[], noteIds: [] as ID[], linkUrls: [] as string[], projectId: null as ID | null };
+
+        let projectId = choice.projectId;
+        let project: Project | null = projectId ? (d.projects[projectId] ?? null) : null;
+        const create = choice.actions.find((a) => a.type === 'create_project');
+        if (create && create.type === 'create_project') {
+          project = api.createProject({
+            title: create.title,
+            summary: create.summary,
+            goalIds: create.goalIds.filter((g) => d.goals[g]),
+            status: create.status,
+            dueDate: create.dueDate,
+          });
+          projectId = project.id;
+          applied.projectId = project.id;
+        }
+
+        const links = [...(project?.links ?? [])];
+        const requirements = [...(project?.requirements ?? [])];
+        const anchors: ProjectAnchors = project
+          ? { ...project.anchors, repos: [...project.anchors.repos], jiraKeys: [...project.anchors.jiraKeys], keywords: [...project.anchors.keywords], channels: [...project.anchors.channels] }
+          : { repos: [], jiraKeys: [], keywords: [], channels: [] };
+        let projectChanged = false;
+
+        for (const action of choice.actions) {
+          switch (action.type) {
+            case 'log_update': {
+              const u = api.addUpdate({
+                projectId,
+                date: action.date,
+                text: action.text,
+                kind: action.kind,
+                progressTo: projectId ? action.progressTo : null,
+                statusTo: projectId ? action.statusTo : null,
+                source,
+                proposalId: id,
+              });
+              applied.updateIds.push(u.id);
+              break;
+            }
+            case 'add_note': {
+              const n = api.createNote({ projectId, title: action.title, body: action.body });
+              applied.noteIds.push(n.id);
+              break;
+            }
+            case 'add_link':
+              if (project && !links.some((l) => l.url === action.url)) {
+                links.push({ id: newId('l'), url: action.url, label: action.label, kind: action.kind, createdAt: now });
+                applied.linkUrls.push(action.url);
+                projectChanged = true;
+              }
+              break;
+            case 'add_requirement':
+              if (project) {
+                requirements.push({ id: newId('r'), text: action.text, done: false, level: action.level, createdAt: now });
+                projectChanged = true;
+              }
+              break;
+            case 'complete_requirement': {
+              const i = requirements.findIndex((r) => r.id === action.requirementId);
+              if (i >= 0 && !requirements[i].done) {
+                requirements[i] = { ...requirements[i], done: true };
+                projectChanged = true;
+              }
+              break;
+            }
+            case 'add_anchor':
+              if (project && !anchors[action.field].includes(action.value)) {
+                anchors[action.field].push(action.value);
+                projectChanged = true;
+              }
+              break;
+            case 'send_report':
+              // The agent sends approved reports through your Teams workflow on its next run.
+              if (d.reports[action.reportId]) void patch('reports', action.reportId, { status: 'approved', updatedAt: now });
+              break;
+            case 'create_project':
+              break;
+          }
+        }
+
+        if (project && projectId && projectChanged) {
+          // A direct patch: a project created a moment ago isn't in the snapshot yet, so
+          // updateProject() wouldn't find it. Writes to one record run in order, so this lands after the create.
+          void patch('projects', projectId, { links, requirements, anchors, updatedAt: now, lastActivityAt: now });
+        }
+        void patch('inbox', id, {
+          status: 'approved',
+          decidedAt: now,
+          projectId,
+          actions: choice.actions,
+          applied,
+          updatedAt: now,
+        });
+      },
+
+      dismissProposal(id: ID) {
+        const now = nowISO();
+        void patch('inbox', id, { status: 'dismissed', decidedAt: now, updatedAt: now });
+      },
+
+      /** Brings a dismissed proposal back to the inbox. */
+      restoreProposal(id: ID) {
+        void patch('inbox', id, { status: 'pending', decidedAt: null, updatedAt: nowISO() });
+      },
+
+      /**
+       * Reverses what an auto-logged or approved proposal created: its updates,
+       * notes and links. Progress and stage go back if nothing moved them since.
+       */
+      undoProposal(id: ID) {
+        const d = dataRef.current;
+        const proposal = d.inbox[id];
+        if (!proposal || (proposal.status !== 'auto' && proposal.status !== 'approved')) return;
+        const now = nowISO();
+        const projectId = proposal.projectId;
+        const project = projectId ? d.projects[projectId] : null;
+        const revert: Partial<Project> = {};
+        for (const uid of proposal.applied.updateIds) {
+          const u = d.updates[uid];
+          if (!u) continue;
+          if (project && u.progressTo !== null && u.progressFrom !== null && project.progress === u.progressTo) {
+            revert.progress = u.progressFrom;
+          }
+          if (project && u.statusTo && u.statusFrom && project.status === u.statusTo) revert.status = u.statusFrom;
+          void remove('updates', uid);
+        }
+        proposal.applied.noteIds.forEach((nid) => d.notes[nid] && void remove('notes', nid));
+        if (project && proposal.applied.linkUrls.length) {
+          revert.links = project.links.filter((l) => !proposal.applied.linkUrls.includes(l.url));
+        }
+        if (project && Object.keys(revert).length) api.updateProject(project.id, revert, { silent: true });
+        void patch('inbox', id, { status: 'undone', decidedAt: now, updatedAt: now });
+        toast({ message: 'Undone. The entry was removed from your log.', icon: 'undo' });
+      },
+
+      /** Turns a source off, makes it ask first, or lets it log low-risk items itself. */
+      setConnectorMode(id: string, mode: ConnectorMode) {
+        const existing = dataRef.current.connectors[id];
+        const now = nowISO();
+        if (existing) void patch('connectors', id, { mode, updatedAt: now });
+        else void create('connectors', normalizeConnector(id, { mode, updatedAt: now }));
+      },
+
+      /** Tells a connector to skip a folder, file or channel from now on. */
+      ignoreForConnector(id: string, value: string) {
+        const existing = dataRef.current.connectors[id];
+        const now = nowISO();
+        if (existing) {
+          if (!existing.ignore.includes(value)) void patch('connectors', id, { ignore: [...existing.ignore, value], updatedAt: now });
+        } else {
+          void create('connectors', normalizeConnector(id, { mode: 'ask', ignore: [value], updatedAt: now }));
+        }
+      },
+
+      /* Weekly reports ------------------------------------------------------ */
+
+      editReport(id: ID, body: Partial<Report>) {
+        return patch('reports', id, { ...body, updatedAt: nowISO() });
+      },
+
+      /** You sent it yourself (for example from the pre-filled Teams chat). */
+      markReportSent(id: ID) {
+        const now = nowISO();
+        void patch('reports', id, { status: 'sent', sentAt: now, sentVia: 'manual', note: '', updatedAt: now });
+        const pending = Object.values(dataRef.current.inbox).find(
+          (p) => p.status === 'pending' && p.actions.some((a) => a.type === 'send_report' && a.reportId === id),
+        );
+        if (pending) void patch('inbox', pending.id, { status: 'approved', decidedAt: now, updatedAt: now });
+        toast({ message: 'Marked as sent', tone: 'good', icon: 'check' });
+      },
+
+      /** Queues a draft for the agent to send through your Teams workflow. */
+      approveReport(id: ID) {
+        const now = nowISO();
+        void patch('reports', id, { status: 'approved', updatedAt: now });
+        const pending = Object.values(dataRef.current.inbox).find(
+          (p) => p.status === 'pending' && p.actions.some((a) => a.type === 'send_report' && a.reportId === id),
+        );
+        if (pending) void patch('inbox', pending.id, { status: 'approved', decidedAt: now, updatedAt: now });
+      },
+
+      deleteReport(id: ID) {
+        const r = dataRef.current.reports[id];
+        if (!r) return;
+        void remove('reports', id);
+        toast({ message: `Deleted “${r.title}”`, icon: 'trash', action: { label: 'Undo', onClick: () => void create('reports', r) } });
+      },
+
+      unignoreForConnector(id: string, value: string) {
+        const existing = dataRef.current.connectors[id];
+        if (!existing) return;
+        void patch('connectors', id, { ignore: existing.ignore.filter((x) => x !== value), updatedAt: nowISO() });
+      },
+
+      /** Replaces what ties outside work to a project (folders, Jira keys, keywords, channels). */
+      setAnchors(projectId: ID, anchors: ProjectAnchors) {
+        api.updateProject(projectId, { anchors }, { silent: true });
+      },
+
       exportData(): ExportFile {
         const d = dataRef.current;
         return {
           app: 'workfile',
-          schemaVersion: 1,
+          schemaVersion: 2,
           exportedAt: nowISO(),
           settings: d.settings,
           goals: Object.values(d.goals),
           projects: Object.values(d.projects),
           updates: Object.values(d.updates),
           notes: Object.values(d.notes),
+          reports: Object.values(d.reports),
         };
       },
 
@@ -421,8 +670,9 @@ function useStoreValue() {
             projects: new Set(file.projects.map((x) => (x as Project).id)),
             updates: new Set(file.updates.map((x) => (x as Update).id)),
             notes: new Set(file.notes.map((x) => (x as Note).id)),
+            reports: new Set((file.reports ?? []).map((x) => (x as Report).id)),
           };
-          for (const col of COLLECTIONS) {
+          for (const col of EXPORTED_COLLECTIONS as Array<keyof typeof keep>) {
             for (const id of Object.keys(d[col])) if (!keep[col].has(id)) jobs.push(() => a.remove(col, id));
           }
         }
@@ -438,6 +688,7 @@ function useStoreValue() {
         add('projects', file.projects, normalizeProject, 'p');
         add('updates', file.updates, normalizeUpdate, 'u');
         add('notes', file.notes, normalizeNote, 'n');
+        add('reports', file.reports ?? [], normalizeReport, 'w');
         jobs.push(() => a.saveSettings(normalizeSettings(file.settings)));
         await track(runPool(jobs, 4, (job) => job()));
         return {
@@ -452,10 +703,14 @@ function useStoreValue() {
         const d = dataRef.current;
         const a = adapter();
         const jobs: Array<() => Promise<void>> = [];
-        for (const col of COLLECTIONS) for (const id of Object.keys(d[col])) jobs.push(() => a.remove(col, id));
+        // Connector settings stay: they describe this account's setup, not your work.
+        for (const col of [...EXPORTED_COLLECTIONS, 'inbox'] as CollectionName[]) {
+          for (const id of Object.keys(d[col])) jobs.push(() => a.remove(col, id));
+        }
         await track(runPool(jobs, 4, (job) => job()));
       },
     };
+    return api;
   }, [toast]);
 
   return { data, ready, meta, actions };
